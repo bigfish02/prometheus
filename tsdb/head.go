@@ -1706,6 +1706,9 @@ func (m seriesHashmap) set(hash uint64, s *memSeries) {
 		m.unique[hash] = s
 		return
 	}
+	if m.conflicts == nil {
+		m.conflicts = make(map[uint64][]*memSeries)
+	}
 	l := m.conflicts[hash]
 	for i, prev := range l {
 		if labels.Equal(prev.lset, s.lset) {
@@ -1785,7 +1788,7 @@ func newStripeSeries(stripeSize int, seriesCallback SeriesLifecycleCallback) *st
 	for i := range s.hashes {
 		s.hashes[i] = seriesHashmap{
 			unique:    map[uint64]*memSeries{},
-			conflicts: map[uint64][]*memSeries{},
+			conflicts: nil, // Initialized on demand in set().
 		}
 	}
 	return s
