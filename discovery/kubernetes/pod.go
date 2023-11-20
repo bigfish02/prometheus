@@ -17,6 +17,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/docker/docker/client"
 	"net"
 	"strconv"
 	"strings"
@@ -48,6 +49,7 @@ type Pod struct {
 	store            cache.Store
 	logger           log.Logger
 	queue            *workqueue.Type
+	criCli           *client.Client
 }
 
 // NewPod creates a new pod discovery.
@@ -55,7 +57,7 @@ func NewPod(l log.Logger, pods cache.SharedIndexInformer, nodes cache.SharedInfo
 	if l == nil {
 		l = log.NewNopLogger()
 	}
-
+	cli, _ := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	p := &Pod{
 		podInf:           pods,
 		nodeInf:          nodes,
@@ -63,6 +65,7 @@ func NewPod(l log.Logger, pods cache.SharedIndexInformer, nodes cache.SharedInfo
 		store:            pods.GetStore(),
 		logger:           l,
 		queue:            workqueue.NewNamed("pod"),
+		criCli:           cli,
 	}
 	_, err := p.podInf.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(o interface{}) {
@@ -194,6 +197,7 @@ const (
 	podUID                        = metaLabelPrefix + "pod_uid"
 	podControllerKind             = metaLabelPrefix + "pod_controller_kind"
 	podControllerName             = metaLabelPrefix + "pod_controller_name"
+	podFSMergedDir                = metaLabelPrefix + "pod_fs_merged_dir"
 )
 
 // GetControllerOf returns a pointer to a copy of the controllerRef if controllee has a controller
@@ -250,6 +254,20 @@ func (p *Pod) findPodContainerID(statuses *[]apiv1.ContainerStatus, containerNam
 	return cStatus.ContainerID
 }
 
+func (p *Pod) findFSMergedDir(id string) string {
+	if strings.HasPrefix(id, "docker://") {
+		json, err := p.criCli.ContainerInspect(context.Background(), strings.TrimPrefix(id, "docker://"))
+		if err != nil {
+			return ""
+		}
+		return json.GraphDriver.Data["MergedDir"]
+	}
+	if strings.HasPrefix(id, "containerd://") {
+		return "/run/containerd/io.containerd.runtime.v2.task/k8s.io" + strings.TrimPrefix(id, "containerd://")
+	}
+	return ""
+}
+
 func (p *Pod) buildPod(pod *apiv1.Pod) *targetgroup.Group {
 	tg := &targetgroup.Group{
 		Source: podSource(pod),
@@ -274,6 +292,7 @@ func (p *Pod) buildPod(pod *apiv1.Pod) *targetgroup.Group {
 			cStatuses = &pod.Status.InitContainerStatuses
 		}
 		cID := p.findPodContainerID(cStatuses, c.Name)
+		mergedDir := p.findFSMergedDir(cID)
 
 		// If no ports are defined for the container, create an anonymous
 		// target per container.
@@ -286,6 +305,7 @@ func (p *Pod) buildPod(pod *apiv1.Pod) *targetgroup.Group {
 				podContainerIDLabel:    lv(cID),
 				podContainerImageLabel: lv(c.Image),
 				podContainerIsInit:     lv(strconv.FormatBool(isInit)),
+				podFSMergedDir:         lv(mergedDir),
 			})
 			continue
 		}
@@ -303,6 +323,7 @@ func (p *Pod) buildPod(pod *apiv1.Pod) *targetgroup.Group {
 				podContainerPortNameLabel:     lv(port.Name),
 				podContainerPortProtocolLabel: lv(string(port.Protocol)),
 				podContainerIsInit:            lv(strconv.FormatBool(isInit)),
+				podFSMergedDir:                lv(mergedDir),
 			})
 		}
 	}
