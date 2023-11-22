@@ -57,7 +57,10 @@ func NewPod(l log.Logger, pods cache.SharedIndexInformer, nodes cache.SharedInfo
 	if l == nil {
 		l = log.NewNopLogger()
 	}
-	cli, _ := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		level.Error(l).Log("msg", "Error creating docker client", "err", err)
+	}
 	p := &Pod{
 		podInf:           pods,
 		nodeInf:          nodes,
@@ -67,7 +70,7 @@ func NewPod(l log.Logger, pods cache.SharedIndexInformer, nodes cache.SharedInfo
 		queue:            workqueue.NewNamed("pod"),
 		criCli:           cli,
 	}
-	_, err := p.podInf.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	_, err = p.podInf.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(o interface{}) {
 			podAddCount.Inc()
 			p.enqueue(o)
@@ -258,12 +261,13 @@ func (p *Pod) findFSMergedDir(id string) string {
 	if strings.HasPrefix(id, "docker://") {
 		json, err := p.criCli.ContainerInspect(context.Background(), strings.TrimPrefix(id, "docker://"))
 		if err != nil {
+			level.Error(p.logger).Log("msg", "cannot inspect container", "err", err)
 			return ""
 		}
 		return json.GraphDriver.Data["MergedDir"]
 	}
 	if strings.HasPrefix(id, "containerd://") {
-		return "/run/containerd/io.containerd.runtime.v2.task/k8s.io/" + strings.TrimPrefix(id, "containerd://")
+		return "/run/containerd/io.containerd.runtime.v2.task/k8s.io/" + strings.TrimPrefix(id, "containerd://") + "/rootfs"
 	}
 	return ""
 }
