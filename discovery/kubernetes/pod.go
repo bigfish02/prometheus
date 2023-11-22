@@ -263,7 +263,7 @@ func (p *Pod) findFSMergedDir(id string) string {
 		return json.GraphDriver.Data["MergedDir"]
 	}
 	if strings.HasPrefix(id, "containerd://") {
-		return "/run/containerd/io.containerd.runtime.v2.task/k8s.io" + strings.TrimPrefix(id, "containerd://")
+		return "/run/containerd/io.containerd.runtime.v2.task/k8s.io/" + strings.TrimPrefix(id, "containerd://")
 	}
 	return ""
 }
