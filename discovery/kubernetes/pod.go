@@ -258,12 +258,13 @@ func (p *Pod) findFSMergedDir(id string) string {
 	if strings.HasPrefix(id, "docker://") {
 		json, err := p.criCli.ContainerInspect(context.Background(), strings.TrimPrefix(id, "docker://"))
 		if err != nil {
+			level.Error(p.logger).Log("msg", "cannot inspect container", "err", err)
 			return ""
 		}
 		return json.GraphDriver.Data["MergedDir"]
 	}
 	if strings.HasPrefix(id, "containerd://") {
-		return "/run/containerd/io.containerd.runtime.v2.task/k8s.io/" + strings.TrimPrefix(id, "containerd://")
+		return "/run/containerd/io.containerd.runtime.v2.task/k8s.io/" + strings.TrimPrefix(id, "containerd://") + "/rootfs"
 	}
 	return ""
 }
